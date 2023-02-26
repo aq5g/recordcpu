@@ -1,0 +1,185 @@
+package main
+
+import (
+	"fmt"
+	"log"
+	"time"
+
+	"recordcpu/readcpu"
+	"recordcpu/scmd"
+	"strings"
+	// "time"
+)
+
+func main() {
+	pidTimestampCPUTime := make(map[string]map[int64][]string, 20)
+	// map[int64][]string should use []struct, struct = int64 + []string
+	// because sorted!!
+	ch := make(chan bool, 1)
+	cmdStr := "ps -ef | grep kworker | grep -v grep"
+	start := time.Now()
+	go func(chan bool) {
+		for {
+			select {
+			case <-ch:
+				time.Sleep(3 * time.Second)
+				ch <- true
+				return
+			default:
+			}
+			retpidstrn, err := scmd.RunCmdwithPipe(cmdStr)
+			if err != nil {
+				log.Println(err)
+				break
+			}
+			retpidstr := strings.TrimSpace(retpidstrn)
+			retpidlist := strings.Split(retpidstr, "\n")
+			timestamp := time.Since(start).Microseconds()
+			for _, v := range retpidlist {
+				var i int
+				for {
+					if v[i] == ' ' {
+						break
+					}
+					i++
+				}
+				for {
+					if v[i] != ' ' {
+						// first pid number
+						break
+					}
+					i++
+				}
+				j := i
+				for {
+					if v[j] == ' ' {
+						// end +1
+						break
+					}
+					j++
+				}
+				if _, ok := pidTimestampCPUTime[v[i:j]]; !ok {
+					pidTimestampCPUTime[v[i:j]] = make(map[int64][]string)
+				}
+				go func(pid string) {
+					pcpu, err := readcpu.ProcessCpu(pid)
+					if err != nil {
+						fmt.Println(err)
+						return
+					}
+					pidTimestampCPUTime[pid][timestamp] = pcpu
+				}(v[i:j])
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
+	}(ch)
+
+	time.Sleep(5 * time.Second)
+	ch <- true
+	<-ch
+	for pid, tc := range pidTimestampCPUTime {
+		fmt.Println(pid)
+		for t, c := range tc {
+			fmt.Println(t, c)
+		}
+	}
+}
+
+// func main() {
+// 	retpidstrn, err := scmd.RunCmdwithPipe("ps -ef | grep kworker | grep -v grep")
+// 	if err != nil {
+// 		log.Println(err)
+// 		return
+// 	}
+// 	fmt.Println(retpidstrn)
+// 	retpidstr := strings.TrimSpace(retpidstrn)
+// 	retpidlist := strings.Split(retpidstr, "\n")
+// 	fmt.Println(retpidlist, len(retpidlist))
+// 	for _, v := range retpidlist {
+// 		var i int
+// 		for {
+// 			if v[i] == ' ' {
+// 				break
+// 			}
+// 			i++
+// 		}
+// 		for {
+// 			if v[i] != ' ' {
+// 				// first pid number
+// 				break
+// 			}
+// 			i++
+// 		}
+// 		j := i
+// 		for {
+// 			if v[j] == ' ' {
+// 				// end +1
+// 				break
+// 			}
+// 			j++
+// 		}
+// 		// fmt.Println(v[i:j])
+// 		go func(pid string) {
+// 			pcpu, err := readcpu.ProcessCpu(pid)
+// 			if err != nil {
+// 				fmt.Println(err)
+// 				return
+// 			}
+// 			fmt.Println(pid, pcpu)
+// 		}(v[i:j])
+// 		// time.Sleep(2 * time.Second)
+// 	}
+// 	time.Sleep(5 * time.Second)
+// }
+
+// func main() {
+// 	retpidstr, err := scmd.RunCmdwithPipe("ps -ef | grep scsi")
+// 	if err != nil {
+// 		log.Println(err)
+// 		return
+// 	}
+// 	retpidlist := strings.Split(retpidstr, "\n")
+// 	retpid := retpidlist[0]
+// 	fmt.Println("len:", len(retpid))
+// 	for i, v := range retpid {
+// 		fmt.Println(i, v)
+// 	}
+// }
+
+// func main() {
+// 	pid := 292
+// 	for {
+
+// 		time.Sleep(time.Second)
+
+// 		ret1, err := readcpu.ProcessCpu(pid)
+// 		if err != nil {
+// 			log.Println(err)
+// 			return
+// 		}
+// 		fmt.Println(ret1)
+// 		pid++
+// 	}
+// }
+
+// func main() {
+// 	result1, err := readcpu.TotalCpu()
+// 	if err != nil {
+// 		log.Println(err)
+// 		return
+// 	}
+// 	time.Sleep(5 * time.Second)
+// 	result2, err := readcpu.TotalCpu()
+// 	if err != nil {
+// 		log.Println(err)
+// 		return
+// 	}
+// 	fmt.Println("res1:", result1)
+// 	fmt.Println("res2:", result2)
+// 	result, err := readcpu.SubTotalCpu(result1, result2)
+// 	if err != nil {
+// 		log.Println(err)
+// 		return
+// 	}
+// 	fmt.Println(result, len(result))
+// }
