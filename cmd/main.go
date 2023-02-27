@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strconv"
 	"sync"
 	"time"
 
@@ -23,22 +24,29 @@ var (
 	// psgrepcmdStr          string = "ps -ef | grep kworker | grep -v grep"
 	cpCmdstr        string
 	zpoolSyncCmdstr string
+	recordinterval  int
 )
 
 type lockmap struct {
-	lock                sync.RWMutex
+	lock                sync.Mutex
 	pidTimestampCPUTime map[string][]timestampCputime
 }
 
 func main() {
-	if len(os.Args) != 4 {
-		fmt.Println("program cpstr zpoolsyncstr psgrepcmdStr")
+	if len(os.Args) != 5 {
+		fmt.Println("program cpstr zpoolsyncstr psgrepcmdStr recordinterval(ms)")
 		return
 	} else {
 		cpCmdstr = os.Args[1]
 		zpoolSyncCmdstr = os.Args[2]
 		psgrepcmdStr = os.Args[3]
-		fmt.Printf("%v\n%v\n%v\n", cpCmdstr, zpoolSyncCmdstr, psgrepcmdStr)
+		var err error
+		recordinterval, err = strconv.Atoi(os.Args[4])
+		fmt.Printf("%v\n%v\n%v\n%v\n", cpCmdstr, zpoolSyncCmdstr, psgrepcmdStr, os.Args[4])
+		if err != nil {
+			fmt.Println(err)
+			return
+		}
 	}
 	var mylockmap lockmap
 	mylockmap.pidTimestampCPUTime = make(map[string][]timestampCputime, 20)
@@ -48,7 +56,7 @@ func main() {
 		for {
 			select {
 			case <-ch:
-				time.Sleep(3 * time.Second)
+				time.Sleep(30 * time.Second)
 				ch <- true
 				return
 			default:
@@ -84,9 +92,11 @@ func main() {
 					}
 					j++
 				}
+				mylockmap.lock.Lock()
 				if _, ok := mylockmap.pidTimestampCPUTime[v[i:j]]; !ok {
 					mylockmap.pidTimestampCPUTime[v[i:j]] = make([]timestampCputime, 0)
 				}
+				mylockmap.lock.Unlock()
 				go func(pid string) {
 					pcpu, err := readcpu.ProcessCpu(pid)
 					if err != nil {
@@ -100,7 +110,7 @@ func main() {
 					mylockmap.pidTimestampCPUTime[pid] = tmp
 				}(v[i:j])
 			}
-			time.Sleep(100 * time.Millisecond)
+			time.Sleep(time.Duration(recordinterval) * time.Millisecond)
 		}
 	}(ch)
 
@@ -123,6 +133,8 @@ func main() {
 
 	ch <- true
 	<-ch
+	mylockmap.lock.Lock()
+	defer mylockmap.lock.Unlock()
 	// print
 	fmt.Println("------all result")
 	for pid, ltc := range mylockmap.pidTimestampCPUTime {
@@ -147,6 +159,15 @@ func main() {
 		}
 	}
 
+	var lencputime int
+	for _, ltc := range mylockmap.pidTimestampCPUTime {
+		if len(ltc) > 0 {
+			lencputime = len(ltc[0].cputime)
+			break
+		}
+	}
+	sumcputime := make([]int, lencputime)
+
 	// cost time
 	fmt.Println("cost time")
 	for pid, ltc := range mylockmap.pidTimestampCPUTime {
@@ -156,7 +177,11 @@ func main() {
 			continue
 		}
 		if len(ltc) == 1 {
-			fmt.Println(ltc[0])
+			fmt.Println(ltc[0].cputime)
+			for i, v := range ltc[0].cputime {
+				vv, _ := strconv.Atoi(v)
+				sumcputime[i] += vv
+			}
 		} else {
 			tmp, err := readcpu.SubListCpuTime(ltc[0].cputime, ltc[len(ltc)-1].cputime)
 			if err != nil {
@@ -164,8 +189,14 @@ func main() {
 				continue
 			} else {
 				fmt.Println(tmp)
+				for i, v := range tmp {
+					sumcputime[i] += v
+				}
 			}
 		}
 
 	}
+
+	// sum
+	fmt.Println("sum : ", sumcputime)
 }
